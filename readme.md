@@ -29,6 +29,97 @@ Analoginya: JSON itu seperti mengirim **daftar surat**, satu baris = satu
 tahu tipenya sendiri (angka tetap angka, tanggal tetap tanggal), jadi
 aplikasi penerima tidak perlu menebak-nebak atau mengonversi ulang.
 
+## 1.5 Contoh Query DAX dan Bentuk Hasilnya
+
+Biar tidak abstrak, mari lihat contoh nyata. Misalkan semantic model kamu
+punya tabel `Sales` dengan kolom `Region` dan `Amount`. Query DAX-nya:
+
+```dax
+EVALUATE
+SUMMARIZECOLUMNS(
+    'Sales'[Region],
+    "Total Amount", SUM('Sales'[Amount])
+)
+```
+
+Artinya: "kelompokkan tabel Sales per Region, lalu jumlahkan Amount-nya".
+Kalau dijalankan, DAX Engine di Power BI menghasilkan sebuah **tabel hasil**
+seperti ini (ini yang disebut "rowset" di dokumentasi):
+
+| Region | Total Amount |
+|---|---|
+| Jakarta | 125000.50 |
+| Surabaya | 89000.00 |
+| Bandung | 67500.25 |
+
+Tabel di atas itu **konsep**-nya sama di kedua endpoint. Yang beda adalah
+**cara mengemasnya jadi bytes untuk dikirim lewat internet**. Di sinilah
+Arrow vs JSON mulai berbeda.
+
+### Kalau dikirim sebagai JSON (endpoint lama, `executeQueries`)
+
+Responsnya kurang lebih begini — perhatikan setiap baris jadi objek
+berulang, dan nama kolom diulang-ulang di setiap baris:
+
+```json
+{
+  "results": [
+    {
+      "tables": [
+        {
+          "rows": [
+            { "Sales[Region]": "Jakarta",  "[Total Amount]": "125000.50" },
+            { "Sales[Region]": "Surabaya", "[Total Amount]": "89000.00" },
+            { "Sales[Region]": "Bandung",  "[Total Amount]": "67500.25" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Masalahnya: `"125000.50"` itu **string**, bukan angka. Aplikasi penerima
+harus tahu sendiri untuk mengubahnya jadi `float`/`Decimal` sebelum bisa
+dihitung. Kalau kolomnya tanggal, sama saja — jadi string yang harus
+di-parse ulang manual.
+
+### Kalau dikirim sebagai Arrow (endpoint baru, `executeDaxQueries`)
+
+Arrow tidak mengirim satu-satu baris sebagai objek. Arrow mengirim dalam
+bentuk **kolom**, plus sebuah "kepala surat" (schema) yang bilang di depan:
+"kolom pertama namanya Region, tipenya teks; kolom kedua namanya Total
+Amount, tipenya decimal dengan 4 angka di belakang koma". Kira-kira begini
+konsepnya kalau digambarkan (bukan format bytes sungguhan, tapi biar kebayang):
+
+```
+Schema:
+  Region       : utf8
+  Total Amount : decimal128(19, 4)
+
+Data (per kolom, bukan per baris):
+  Region       = ["Jakarta", "Surabaya", "Bandung"]
+  Total Amount = [125000.5000, 89000.0000, 67500.2500]
+```
+
+Karena tipenya sudah dideklarasikan di depan (di schema), dan nilainya
+disimpan per kolom secara biner (bukan teks), aplikasi penerima (lewat
+`pyarrow`) bisa langsung tahu `Total Amount` itu angka desimal presisi
+tinggi, tanpa perlu menebak atau parsing string. Itulah yang bikin lebih
+cepat dan lebih hemat ukuran (karena tidak perlu mengetik ulang nama kolom
+di setiap baris, dan angka disimpan biner bukan teks).
+
+### Hubungannya dengan simulasi di `main.py`
+
+Fungsi `build_sample_table()` di `main.py` itu **berpura-pura jadi hasil**
+dari query DAX semacam di atas (bedanya cuma kolomnya lebih banyak: Region,
+Date, Amount, Quantity, IsActive, dan barisnya 5.000 biar bedanya kelihatan
+jelas). Fungsi `to_arrow_ipc_bytes()` dan `to_json_bytes()` lalu
+mensimulasikan **cara mengemas tabel itu** persis seperti dua contoh di
+atas — itu sebabnya di hasil run kamu, kolom `Amount` dan `Date` dari versi
+JSON berubah jadi `str`, sedangkan dari versi Arrow tetap `Decimal` dan
+`date` asli.
+
 ## 2. Kenapa Ini Penting? (3 Alasan Utama)
 
 ### a) Ukuran payload jauh lebih kecil
