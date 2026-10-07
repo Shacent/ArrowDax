@@ -111,7 +111,7 @@ di setiap baris, dan angka disimpan biner bukan teks).
 
 ### Hubungannya dengan simulasi di `main.py`
 
-Fungsi `build_sample_table()` di `main.py` itu **berpura-pura jadi hasil**
+Fungsi `build_sample_table()` di `main.py`
 dari query DAX semacam di atas (bedanya cuma kolomnya lebih banyak: Region,
 Date, Amount, Quantity, IsActive, dan barisnya 5.000 biar bedanya kelihatan
 jelas). Fungsi `to_arrow_ipc_bytes()` dan `to_json_bytes()` lalu
